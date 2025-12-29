@@ -12,7 +12,7 @@ I, as a developer of this RFToolkit do not take ANY responsibility for your(user
 The DSD feature relies on the **dsdccx** utility, which uses an underlying library called **mbelib** to decode digital voice standards (like DMR). This vocoder technology (AMBE/MBE) **may be covered by one or more U.S. patents owned by DVSI Inc.** The GPL license of this software grants you copyright rights, but it **does not** grant you patent rights. Proceed with caution and ensure compliance with patent law in your jurisdiction if using the DSD feature.
 
 ==================================================
-### DO NOT CONTRIBUTE ANY LLM GENERATED DOGSHIT, EVEN IF IT WORKS, EVEN IF IT WAS TESTED, I DONT CARE
+### DO NOT CONTRIBUTE ANY LLM GENERATED CODE, EVEN IF YOU THINK IT WORKS, EVEN IF YOU TESTED IT, I DONT CARE
 ==================================================
 
 ### "What even is this?"
