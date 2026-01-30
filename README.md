@@ -55,7 +55,7 @@ Dont... seriously, i will not take the money, first - because transferring funds
 * **RF_Jamming** - Literally a jammer that allows you to either block one frequency or sweep a wide range of frequencies.
     * **NOTE:** Jamming a wide range of frequencies using sweeping/random methods is not as effective, simply because we cannot cover much with just one device.
 * **Protocols** - Contains protocol-specific tools. For now includes:
-    * **ADS-B Protocol Scan:** Decodes aircraft transmissions on 1090 MHz. **NEW: now fully works(i think, cpr is quirky, need knowing people to test), a lot of info displays perfectly fine**
+    * **ADS-B Protocol Scan:** Decodes aircraft transmissions on 1090 MHz. **NEW: now fully works(also added Local/Global CPR decoding method switch)** **(If you want to learn more about Compact Position Reporting, this is what i used to make adsb.py stuff: https://shemesh.larc.nasa.gov/fm/papers/FAOC2021-draft.pdf and https://shemesh.larc.nasa.gov/fm/papers/FM2018-draft.pdf ALSO check nasa's github, there are examples in cpp i think, thank them for making adsb.py possible!)**
     * **DSD (Digital Speech Decoder) (BETA):** Captures and decodes digital voice communications (DMR, dPMR, etc.). **Needs further testing.**
 * **Samples/Scripts (Portapack/FZ)** - Menu for using pre-recorded samples or activating interesting scripts taken from different Portapack and Flipper Zero firmwares (Coming Soon).
 
