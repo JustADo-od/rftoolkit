@@ -53,6 +53,7 @@ class ADSB:
         self.aircraft_data = {}
         self.current_icao = None
         self.current_message_block = []
+        #time for the last seen cleanup
         self.last_cleanup = time.time()
         
         # data queues and buffers
@@ -75,7 +76,9 @@ class ADSB:
             "lat": 0.0,
             "lon": 0.0,
             "stats_every": 10,
-            "max_display_aircraft": 30
+            "max_display_aircraft": 30,
+            # Finally added local cpr decoding(enter your gps coords in the config menu)default to false to prevent bad data if user hasn't set his current location
+            "local_decoding": False
         }
 
     def _save_config(self):
@@ -111,6 +114,9 @@ class ADSB:
                 
                 debug_status = "ON(raw data)" if self.debug_mode else "OFF (table view)"
                 print(f"Debug Mode: {debug_status}")
+                # Show local decoding status
+                local_dec_status = "ON" if self.config.get('local_decoding') else "OFF"
+                print(f"Local Decoding: {local_dec_status}")
                 print("----------------------------------------")
                 print("1. Start ADS-B Monitoring")
                 print("2. View Current Aircraft Output")
@@ -222,15 +228,25 @@ class ADSB:
             print(f"3. Receiver Latitude:       {self.config['lat']}")
             print(f"4. Receiver Longitude:      {self.config['lon']}")
             print(f"5. Max Aircraft to Display: {self.config['max_display_aircraft']}")
-            print("6. Save & Back to Main Menu")
+            # config option for local decoding
+            local_status = "Enabled" if self.config.get('local_decoding') else "Disabled"
+            print(f"6. Local Decoding:          {local_status}")
+            print("7. Save & Back to Main Menu")
             print("----------------------------------------")
             
-            choice = input("\nEnter choice to change (1-6): ").strip()
+            choice = input("\nEnter choice to change (1-7): ").strip()
 
-            if choice == '6':
+            if choice == '7':
                 self._save_config()
                 break
             
+            if choice == '6':
+                #logic toggle for local decoding
+                self.config['local_decoding'] = not self.config.get('local_decoding', False)
+                print(f"\nLocal decoding is now {'Enabled' if self.config['local_decoding'] else 'Disabled'}.")
+                input("Press Enter to continue...")
+                continue
+
             setting_map = {
                 '1': ('gain', int, "Enter HackRF Gain (dB, e.g., 20): "),
                 '2': ('freq', int, "Enter Frequency (Hz, e.g., 1090000000): "),
@@ -421,7 +437,7 @@ class ADSB:
             
         block_text = '\n'.join(self.current_message_block)
 
-        # Reverted ICAO extraction to the reliable regex method
+        # Reverted ICAO extraction to regex, still will have the DF: stuff for reliability
         icao = None
         icao_match = re.search(r'hex:\s*[~]?([0-9a-fA-F]{6})', block_text)
         if icao_match:
@@ -494,6 +510,9 @@ class ADSB:
         cpr_type_match = re.search(r'CPR type:\s*(Airborne|Surface)', block_text)
         cpr_type = cpr_type_match.group(1) if cpr_type_match else None
 
+        #check for local decoding toggle from config
+        use_local = self.config.get('local_decoding', False)
+
         if not cpr_type:
             pos_match = re.search(r'Latitude:\s*([+-]?\d+\.?\d*)\s+Longitude:\s*([+-]?\d+\.?\d*)', block_text)
             if pos_match:
@@ -517,6 +536,30 @@ class ADSB:
             current_time = time.time()
             frame_data = {'lat': lat, 'lon': lon, 'time': current_time, 'type': cpr_type}
 
+            #if local decoding is enabled, try to decode immediately with reference position
+            decoded_locally = False
+            if use_local:
+                # determine format bit 'i': 0 for even, 1 for odd
+                i = 1 if is_odd else 0
+                try:
+                    ref_lat = float(self.config.get('lat', 0.0))
+                    ref_lon = float(self.config.get('lon', 0.0))
+                    
+                    #decode latitude
+                    rec_lat = self._local_decode_lat(ref_lat, lat, i)
+                    
+                    # calculate NL using recovered latitude
+                    nl = self._cpr_NL(rec_lat)
+                    
+                    # decode longitude
+                    rec_lon = self._local_decode_lon(ref_lon, lon, i, nl)
+                    
+                    aircraft['lat'] = f"{rec_lat:.4f}"
+                    aircraft['lon'] = f"{rec_lon:.4f}"
+                    decoded_locally = True
+                except Exception:
+                    pass # fallback to global if local fails
+
             if is_odd:
                 self.cpr_data[icao]['odd'] = frame_data
                 self.cpr_data[icao]['last_odd'] = current_time
@@ -524,7 +567,9 @@ class ADSB:
                 self.cpr_data[icao]['even'] = frame_data
                 self.cpr_data[icao]['last_even'] = current_time
 
-            self._try_decode_cpr_position(icao, aircraft)
+            # Only try global decode if local didn't happen (or failed)
+            if not decoded_locally:
+                self._try_decode_cpr_position(icao, aircraft)
 
         pos_match = re.search(r'Latitude:\s*([+-]?\d+\.?\d*)\s+Longitude:\s*([+-]?\d+\.?\d*)', block_text)
         if pos_match:
@@ -536,7 +581,8 @@ class ADSB:
         if icao not in self.aircraft_data:
             self.aircraft_data[icao] = {
                 'hex': icao,
-                'last_seen': datetime.datetime.now().strftime("%H:%M:%S"),
+                # use time.time() float for logic, convert to string only for display
+                'last_seen': time.time(),
                 'callsign': 'N/A',
                 'altitude': 'N/A',
                 'speed': 'N/A',
@@ -545,8 +591,16 @@ class ADSB:
                 'lat': 'N/A',
                 'lon': 'N/A',
             }
-        self.aircraft_data[icao]['last_seen'] = datetime.datetime.now().strftime("%H:%M:%S")
+        self.aircraft_data[icao]['last_seen'] = time.time()
         return self.aircraft_data[icao]
+        
+    def _cleanup_old_aircraft(self):
+        #remove aircraft tracks that havent updated in 60 seconds
+        cutoff_time = time.time() - 60
+        # create list of keys to remove to avoid runtime errors during iteration
+        to_remove = [k for k, v in self.aircraft_data.items() if v['last_seen'] < cutoff_time]
+        for k in to_remove:
+            del self.aircraft_data[k]
 
     def _cpr_NL(self, lat):
         # ICAO specified NL function
@@ -601,7 +655,7 @@ class ADSB:
 
         dlat_even = scale_lat / (4.0 * NZ)
         dlat_odd = scale_lat / (4.0 * NZ - 1.0)
-
+	# holy fuck thats a lotta math, lmfao
         j = math.floor(((4.0 * NZ - 1.0) * even_lat - (4.0 * NZ) * odd_lat) / max_cpr + 0.5)
 
         rlat_even = dlat_even * (self._cpr_mod(j, int(4 * NZ)) + even_lat / max_cpr)
@@ -739,7 +793,7 @@ class ADSB:
             pass
 
     def _local_decode_lat(self, lat_ref, lat_msg, i):
-        # local decode Formula for latitude (Rlati), not used for now but oh well, maybe i will add it later
+        # local decode formula for latitude (Rlati) for single-message decoding - i THINK it works:D
         # lat_ref: reference latitude (previous position)
         # lat_msg: encoded latitude message (Y^Zi)
         # i: format bit (0=even, 1=odd)
@@ -762,8 +816,8 @@ class ADSB:
         #rlat
         rlat = dlati * (j + encoded_term)
         
-        #corrected Latitude Normalization
-        # check for the 270-degree wrap-around (ICAO/NASA rule)
+        #corrected latitude normalization or sm nerd ass bullshit, RAHHHHHHHHHH
+        # check for the 270-degree wrap-around
         if rlat >= 270.0:
             rlat -= 360.0
             
@@ -774,10 +828,10 @@ class ADSB:
         return rlat
 
     def _local_decode_lon(self, lon_ref, lon_msg, i, nl):
-        # local decode for longitude (Rloni)
-        # lon_msg: tncoded longitude message (X^Zi)
+        #decode for Rloni, fixed Dlon formula used
+        # lon_msg: encoded longitude message (X^Zi)
         # i: format bit (0=even, 1=odd)
-        # nl: number of longitude zones
+        # nl: number of longitude zones (repeating this part to not forget it and its easier to look for it here)
         
         # range check for 17-bit input
         if not (0 <= lon_msg < self.CPR_MAX_VALUE):
@@ -797,7 +851,7 @@ class ADSB:
         # recovered longitude (rlon)
         rlon = dloni * (m + encoded_term)
         
-        # Normalize to [-180, 180] (standard longitude Normalization)
+        # Normalize to [-180, 180]
         while rlon > 180.0:
             rlon -= 360.0
         while rlon < -180.0:
@@ -819,6 +873,7 @@ class ADSB:
                 print("         AIRCRAFT DATA - ADS-B")
                 print("=" * 125)
 
+                # cleanup old aircraft before displaying
                 self._cleanup_old_aircraft()
 
                 now_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -838,7 +893,7 @@ class ADSB:
                     total_tracks = len(self.aircraft_data)
                     max_rows = self.config['max_display_aircraft']
 
-                    print(f"Aircraft tracks seen (Last 2 minutes): {total_tracks} (Displaying top {min(total_tracks, max_rows)})")
+                    print(f"Aircraft tracks seen (Last 60 seconds): {total_tracks} (Displaying top {min(total_tracks, max_rows)})")
                     print("=" * 125)
 
                     if not self.aircraft_data:
@@ -850,7 +905,7 @@ class ADSB:
 
                         sorted_aircraft = sorted(
                             self.aircraft_data.values(),
-                            key=lambda x: x.get('last_seen', ''),
+                            key=lambda x: x.get('last_seen', 0.0), # sort by numeric timestamp
                             reverse=True
                         )
 
@@ -861,7 +916,13 @@ class ADSB:
                             speed = aircraft.get('speed', 'N/A')
                             heading = aircraft.get('heading', 'N/A')
                             v_rate = aircraft.get('v_rate', 'N/A')
-                            last_seen = aircraft.get('last_seen', '---')
+                            
+                            # convert timestamp to string only for display to keep stuff running smooth
+                            ts = aircraft.get('last_seen', 0.0)
+                            if isinstance(ts, float):
+                                last_seen = datetime.datetime.fromtimestamp(ts).strftime("%H:%M:%S")
+                            else:
+                                last_seen = str(ts) # fallback if something broke
 
                             lat_lon = f"{aircraft.get('lat', 'N/A')}/{aircraft.get('lon', 'N/A')}"
 
