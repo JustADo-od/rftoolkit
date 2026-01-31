@@ -70,6 +70,7 @@ I don't expect this thing to work for everyone and everywhere. I try to test all
 ### TODO:
 
 * It's so ugly... (Will add coloring in near future).
+* gps_spoof.py kinda sucks balls, the reason being - it only works on L1 and not all of them(L1, L2, L5, or however tf many are there), also GPS epoch exists
 * Actually make the `Samples/Scripts` tab functional.
 * Add more stuff to the `Protocols` tab + test already pushed features.
 * Remove all swears and хихи-хаха from the code comments if I want to present this as a college coding project (the reason why I'm making this in Python, lol(also gnuradio, scripts coming soon too:D)).
