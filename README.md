@@ -75,3 +75,5 @@ I don't expect this thing to work for everyone and everywhere. I try to test all
 * Remove all swears and хихи-хаха from the code comments if I want to present this as a college coding project (the reason why I'm making this in Python, lol(also gnuradio, scripts coming soon too:D)).
 * Upgrade dsd.py error handling, add some other features and checks to it
 * Add a sound output support for nethunter chroot-ed devices, currently only record function for DSD will work
+* Add IMSI scanner
+* Add drone scanner(really hard, MAYBE impossible with hackrf, altho doubt that)
