@@ -1,3 +1,5 @@
+### WARNING - ADS-B CPR CALCULATION IS BROKEN BECAUSE IM RETARDED, PLEASE WAIT FOR THE FIX
+
 ### !!! WARNING: This is a pretty powerful radio frequency (RF) toolkit in terms of potential trouble you can get yourself in. !!!
 **Use this ONLY in isolated, controlled environments, and only on property and equipment you own or have explicit authorization to use.**
 Radio transmission, jamming, and spoofing are heavily regulated activities.
