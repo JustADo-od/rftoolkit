@@ -4,247 +4,338 @@ from pathlib import Path
 import time
 import sys
 import datetime
-# Note before starting - i have no idea if this even works nowadays, and it will suck if it doesnt:D
+import shutil
+import math
+import threading
+import glob
+
 class GPSSpoof:
     def __init__(self):
         self.gps_sim_dir = Path.home() / ".rf_toolkit" / "gps_sdr_sim"
+        self.motion_dir = self.gps_sim_dir / "motion_files"
+        # check if dirs exist
         self.gps_sim_dir.mkdir(parents=True, exist_ok=True)
-    
-# hey - another cool menu ^_^
+        self.motion_dir.mkdir(exist_ok=True)
+        
     def run(self):
         while True:
             os.system('clear')
             print("========================================")
-            print("            GPS SPOOFING")
+            print("             GPS SPOOFING")
             print("========================================")
-            print("1. Setup GPS SDR Simulator (First Time)")
-            print("2. Generate GPS Signal")
-            print("3. Real-time GPS Spoofing")
-            print("4. Back to Main Menu")
+            print("1. Setup/Update GPS-SDR-SIM")
+            print("2. Ephemeris Manager (Check/Download)")
+            print("3. Configure & Generate Signal")
+            print("4. Transmit Signal")
+            print("5. Back to Main Menu")
             
-            choice = input("\nEnter choice (1-4): ").strip()
+            choice = input("\nEnter choice (1-5): ").strip()
             
             if choice == '1':
                 self.setup_gps_sdr_sim()
             elif choice == '2':
-                self.generate_gps_signal()
+                self.ephemeris_menu()
             elif choice == '3':
-                self.realtime_spoofing()
+                self.generate_signal_menu()
             elif choice == '4':
+                self.transmit_menu()
+            elif choice == '5':
                 return
             else:
                 print("Invalid choice!")
                 input("Press Enter to continue...")
-    # validate if the user set evertyhing up or give ligma
-    # Edit: we dont give ligma, we tell to run setup
-    def is_gps_sdr_sim_available(self):
-        """Check if GPS SDR simulator is built and available"""
-        gps_sdr_sim_path = self.gps_sim_dir / "gps-sdr-sim"
-        return gps_sdr_sim_path.exists() and os.access(gps_sdr_sim_path, os.X_OK)
-    # some other stuff, MORE EXISTENCE CHECKS
-    def show_gps_data_instructions(self):
-        """Show unified GPS data download instructions"""
-        brdc_file = self.gps_sim_dir / "brdc.dat"
-        today = datetime.datetime.now()
-        doy = today.timetuple().tm_yday  # day of year(we need this, trust)
-        year_short = today.strftime("%y")  # two-digit year(and this too) Edit: where tf did i need this?????
-        # If user doesnt have ephemeris file:
-        print("\n" + "="*50)
-        print("GPS EPHEMERIS DATA REQUIRED")
-        print("="*50)
-        print("The GPS simulator needs current GPS broadcast ephemeris data.")
-        print("\nDOWNLOAD INSTRUCTIONS:")
-        print(f"1. Go to: https://cddis.nasa.gov/archive/gnss/data/daily/{datetime.datetime.now().year}/brdc/") #where i needed the year(the link changes every year)
-        print("2. Create an account(you can use tempmail, but you really should update ephemeris from time to time, so not really needed)")
-        print("3. Download the file named like: brdc{doy:03d}{year_short}n.gz (NOT the long once, scroll down to find the one you need)")
-        print(f"   Example: brdc{doy:03d}{year_short}n.gz (for today)")
-        print("4. Extract the compressed file:")
-        print("   - Example: 'gunzip brdc{doy:03d}{year_short}n.gz'")
-        print(f"5. Rename the file: 'mv brdc{doy:03d}{year_short}n {brdc_file}'")
-        print(f"6. Final file should be: {brdc_file}")
-        print("="*50)
-    #set up the gps_sdr_sim (what we use to make a transmittable file to feed to sdr later)
+
     def setup_gps_sdr_sim(self):
-        print("Setting up GPS SDR simulator...")
-        print("This may take a few minutes...")
+        print("\n--- Setup GPS-SDR-SIM ---")
         
-        try:
-            # checks if already cloned(oh boy, did i learn the hard way)
-            if (self.gps_sim_dir / ".git").exists():
-                print("GPS SDR simulator already cloned. Pulling latest changes...")
+        # dir state check
+        if (self.gps_sim_dir / ".git").exists():
+            print("Repository detected. Pulling updates...")
+            try:
                 subprocess.run(['git', 'pull'], cwd=self.gps_sim_dir, check=True)
+            except Exception as e:
+                print(f"[WARN] Git pull failed: {e}")
+        elif any(self.gps_sim_dir.iterdir()):
+            # if directory exists and is not empty, but not a git repo SOMEHOW
+            print(f"[!] Directory {self.gps_sim_dir} exists and is not empty.")
+            print("[!] It is NOT a git repository.")
+            ans = input("Delete and re-clone? (y/n): ").lower()
+            if ans == 'y':
+                shutil.rmtree(self.gps_sim_dir)
+                self.gps_sim_dir.mkdir()
+                self._clone_repo()
             else:
-                # Clone the gps_sdr_sim repository from github
-                print("Cloning GPS SDR simulator repository...")
-                clone_cmd = [
-                    'git', 'clone', 'https://github.com/osqzss/gps-sdr-sim.git',
-                    str(self.gps_sim_dir)
-                ]
-                subprocess.run(clone_cmd, check=True)
+                print("Skipping clone. Trying to compile what is there...")
+        else:
+            # if the directory is empty or just created
+            self._clone_repo()
+
+        # recreate motion_files because rmtree overwrites the folder and shit breaks
+        self.motion_dir.mkdir(exist_ok=True)
+
+        # compile the sucker
+        print("\nCompiling...")
+        try:
+            # -DUSER_MOTION_SIZE=4000 for longer motion files
+            cmd = ['gcc', 'gpssim.c', '-lm', '-O3', '-o', 'gps-sdr-sim', '-DUSER_MOTION_SIZE=4000']
+            subprocess.run(cmd, cwd=self.gps_sim_dir, check=True)
             
-            # build the gps_sim with GCC
-	    # now gps_sdr_sim, im tupid
-            print("Building GPS SDR simulator...")
-            build_cmd = ['gcc', 'gpssim.c', '-lm', '-O3', '-o', 'gps-sdr-sim']
-            result = subprocess.run(build_cmd, cwd=self.gps_sim_dir, capture_output=True, text=True)
-            
-            if result.returncode != 0:
-                print("Build failed. Checking for common issues...")
-                print(f"Build errors: {result.stderr}")
-                raise subprocess.CalledProcessError(result.returncode, build_cmd)
-            
-            # verify that the executable was created
-            if self.is_gps_sdr_sim_available():
-                print("GPS SDR simulator setup completed successfully!")
-                print("Executable built: gps-sdr-sim")
-                
-                # Check if GPS data file exists in proper format and provide instructions if not
-                brdc_file = self.gps_sim_dir / "brdc.dat"
-                if not brdc_file.exists():
-                    self.show_gps_data_instructions()
-                    print("\n" + "="*50)
-                    print("GPS EPHEMERIS DATA REQUIRED")
-       	            print("="*50)
-       	            print("The GPS simulator needs current GPS broadcast ephemeris data.")
-       	            print("\nDOWNLOAD INSTRUCTIONS:")
-                    print(f"1. Go to: https://cddis.nasa.gov/archive/gnss/data/daily/{datetime.datetime.now().year}/brdc/") #where i needed the year(the link changes every year)
-                    print("2. Create an account(you can use tempmail, but you really should update ephemeris from time to time, so not really needed)")
-       	            print("3. Download the file named like: brdc{doy:03d}{year_short}n.gz (NOT the long once, scroll down to find the one you need)")
-       	            print(f"   Example: brdc{doy:03d}{year_short}n.gz (for today)")
-       	            print("4. Extract the compressed file:")
-                    print("   - Example: 'gunzip brdc{doy:03d}{year_short}n.gz'")
-                    print(f"5. Rename the file: 'mv brdc{doy:03d}{year_short}n {brdc_file}'")
-       	            print(f"6. Final file should be: {brdc_file}")
-       	            print("="*50)
-                    
+            if (self.gps_sim_dir / "gps-sdr-sim").exists():
+                print("\ngps-sdr-sim compiled successfully.")
             else:
-# smth smth validation smth smth
-                print("Build appeared successful but executable not found!")
-                print("Looking for executable...")
-                ls_result = subprocess.run(['ls', '-la'], cwd=self.gps_sim_dir, capture_output=True, text=True)
-                print("Directory contents:")
-                print(ls_result.stdout)
-            # error handling!!!!
+                print("\nCompilation command ran but binary not found.")
         except subprocess.CalledProcessError as e:
-            print(f"Setup failed: {e}")
-            print("\nYou may need to install GCC if not available:")
-            print("sudo apt install gcc")
-        except Exception as e:
-            print(f"Error during setup: {e}")
+            print(f"\nCompilation failed: {e}")
+            print("Ensure 'build-essential' is installed: sudo apt install build-essential")
         
         input("Press Enter to continue...")
-#finally making the transmittable file
-    def generate_gps_signal(self):
-        if not self.is_gps_sdr_sim_available():
-            print("GPS SDR simulator not found or not built! Run setup first.")
-            print(f"Expected path: {self.gps_sim_dir / 'gps-sdr-sim'}")
+
+    def _clone_repo(self):
+        print("Cloning https://github.com/osqzss/gps-sdr-sim.git ...")
+        subprocess.run(['git', 'clone', 'https://github.com/osqzss/gps-sdr-sim.git', str(self.gps_sim_dir)], check=True)
+
+    def ephemeris_menu(self):
+        print("\n--- Ephemeris Manager ---")
+        print("GPS-SDR-SIM requires a RINEX GPS navigation file (.n or .19n, .20n etc).")
+        print("It does NOT support GLONASS (.g) files for the main simulation.")
+        
+        #search for existing ephemeras
+        found_files = list(self.gps_sim_dir.glob("brdc*"))
+        valid_gps_file = None
+        
+        if found_files:
+            print(f"\nFound {len(found_files)} candidate files in {self.gps_sim_dir}:")
+            for f in found_files:
+                status = ""
+                # check for gzip
+                if f.suffix == '.gz':
+                    print(f"  - {f.name} [GZIP] -> Extracting...")
+                    try:
+                        subprocess.run(['gunzip', '-k', '-f', str(f)], check=True)
+                        unzipped = f.with_suffix('')
+                        if 'n' in unzipped.suffix:
+                            valid_gps_file = unzipped
+                            status = "[OK - GPS]"
+                        elif 'g' in unzipped.suffix:
+                            status = "[WARNING - GLONASS?]"
+                        print(f"    -> Extracted: {unzipped.name} {status}")
+                    except Exception as e:
+                        print(f"    -> Extraction failed: {e}")
+                else:
+                    # check suffix for n(gps only) or g(GLONASS shit, CAN work, but its better to not take chances)
+                    #standard naming: brdcDDD0.YYn
+                    if 'n' in f.suffix or f.suffix.endswith('n'):
+                        valid_gps_file = f
+                        status = "OK - GPS"
+                    elif 'g' in f.suffix:
+                        status = "WARNING - THIS IS GLONASS, NOT GPS, you need the n file, not the g one"
+                    print(f"  - {f.name} {status}")
+        else:
+            print(f"\nNo 'brdc*' files found in {self.gps_sim_dir}")
+
+        if not valid_gps_file:
+            print("\nNo valid GPS Ephemeris (.n) file found.")
+            print("Please download it manually:")
+            print("1. Go to https://cddis.nasa.gov/archive/gnss/data/daily/")
+            print("2. Select Year -> 'brdc'")
+            print("3. Download a file ending in 'n.gz' (e.g., brdc0310.26n.gz)")
+            print(f"4. Place it in: {self.gps_sim_dir}")
+        else:
+            print(f"\nUsing ephemeris: {valid_gps_file.name}")
+            #store filename for gen step
+            self.ephemeris_file = valid_gps_file
+
+        input("Press Enter to continue...")
+
+    def generate_signal_menu(self):
+        if not (self.gps_sim_dir / "gps-sdr-sim").exists():
+            print("\ngps-sdr-sim binary not found. Run Setup first.")
             input("Press Enter to continue...")
             return
-        
-        try:
-            # Check if GPS data file exists
-            brdc_file = self.gps_sim_dir / "brdc.dat"
-            if not brdc_file.exists():
-                self.show_gps_data_instructions()
+
+        # check if we found a valid ephemeris previously and If not - try to find one again quickly
+        if not hasattr(self, 'ephemeris_file') or not self.ephemeris_file.exists():
+            n_files = list(self.gps_sim_dir.glob("*.*n")) # check for n suffix extension
+            if not n_files:
+                print("\nNo .n ephemeris file found. Go to Option 2.")
                 input("Press Enter to continue...")
                 return
-            # setting coordinates | Edit: god fucking damn it i used multi_gps_sdr_sim, needed to re-write everything above D':
-            print("Enter coordinates for GPS spoofing:")
-            lat = input("Enter latitude (e.g., 40.7128 for NYC): ").strip()
-            lon = input("Enter longitude (e.g., -74.0060 for NYC): ").strip()
-            alt = input("Enter altitude in meters (default 100): ").strip() or "100"
-            duration = input("Enter duration in seconds (default 300, max 86400): ").strip() or "300"
+            self.ephemeris_file = n_files[0]
+
+        while True:
+            os.system('clear')
+            print(f"--- Generate Signal (Using {self.ephemeris_file.name}) ---")
+            print("1. Static Location (Fixed Point)")
+            print("2. Dynamic Circle (Loiter Mode)")
+            print("3. Back")
             
-            # Create output filen
-            output_file = self.gps_sim_dir / "gpssim.bin"
-            
-            # Generate GPS signal using gps-sdr-sim
-            print("Generating GPS signal...")
-            
-            # Build the command using gps-sdr-sim
-            # Format: gps-sdr-sim -e brdc.dat -l lat,lon,alt -d duration -b 8 , i made 10 iterations of this shit, idk how, idk why
-            cmd = [
-                './gps-sdr-sim',
-                '-e', 'brdc.dat',
-                '-l', f"{lat},{lon},{alt}",
-                '-d', duration,
-                '-b', '8'  # 8-bit samples for HackRF, how nice that i remembered that AFTER 8 TRIES
-            ]
-            
-            print(f"Running: {' '.join(cmd)}")
-            print("Output will be saved as: gpssim.bin")
-            
-            result = subprocess.run(cmd, cwd=self.gps_sim_dir, capture_output=True, text=True)
-            
-            if result.returncode == 0:
-                # Check if the file was created (fr this time)
-                default_output = self.gps_sim_dir / "gpssim.bin"
-                if default_output.exists():
-                    print(f"GPS signal generated successfully: {default_output}")
-                    file_size = default_output.stat().st_size / (1024*1024)
-                    print(f"File size: {file_size:.2f} MB")
-                    print("You can now transmit this signal using option 3")
-                else:
-# error handling if some random bs happens somehow :/
-                    print("Command succeeded but output file not found!")
-                    print("Expected file: gpssim.bin")
-            else:
-                print(f"Error generating GPS signal (exit code: {result.returncode})")
-                print(f"STDERR: {result.stderr}")
-                print(f"STDOUT: {result.stdout}")
-                print("\nIf automatic generation fails, try running manually:")
-                print(f"cd {self.gps_sim_dir}")
-                print(f"./gps-sdr-sim -e brdc.dat -l {lat},{lon},{alt} -d {duration} -b 8")
-                print("# Output will be saved as gpssim.bin in the current directory")
-            
-        except Exception as e:
-            print(f"Error generating GPS signal: {e}")
-        
-        input("Press Enter to continue...")
-    # thingy that actually runs the spoof
-    def realtime_spoofing(self):
-        # Check for the default output file name
-        gpssim_file = self.gps_sim_dir / "gpssim.bin"
-        if not gpssim_file.exists():
-            print("No GPS signal file found! Generate a signal first using option 2.")
-            input("Press Enter to continue...")
-            return
+            choice = input("Choice: ").strip()
+            if choice == '1':
+                self._gen_static()
+                break
+            elif choice == '2':
+                self._gen_circle()
+                break
+            elif choice == '3':
+                return
+
+    def _get_time_args(self):
+        # extract the year from the ephemeris filename to know the date
+        # filename format typically: brdcDDD0.YYn
+        filename = self.ephemeris_file.name
         
         try:
-            freq = input("Enter transmission frequency in MHz (default 1575.42 for GPS L1): ").strip() or "1575.42"
-            gain = input("Enter TX gain (0-47, default 20): ").strip() or "20"
-            samp_rate = input("Enter sample rate in Hz (default 2600000): ").strip() or "2600000"
-            repeat = input("Repeat transmission? (y/n, default y): ").strip().lower() or "y"
-            
-            print(f"\nTransmitting GPS signal on {freq} MHz...")
-            print("GPS L1 frequency: 1575.42 MHz")
-            print("Sample rate: {samp_rate} Hz")
-            print("Press Ctrl+C to stop transmission")
-            
-            # transmission command for gps spoofing
-            cmd = [
-                'hackrf_transfer', '-t', 'gpssim.bin',
-                '-f', f"{float(freq)*1e6}", 
-                '-s', samp_rate,
-                '-a', '1', '-x', gain
-            ]
-            
-            # Adding repeat option if requested (stupid ass thing, but oh well)
-            if repeat == 'y':
-                cmd.append('-R')
-                print("Mode: Continuous repeat")
-            else:
-                print("Mode: Single transmission")
-            
-            print(f"Command: {' '.join(cmd)}")
-            print("Starting transmission in 3 seconds...")
-            time.sleep(3)
-            
-            subprocess.run(cmd, cwd=self.gps_sim_dir)
-            
-        except KeyboardInterrupt:
-            print("\nTransmission stopped by user!")
+            # NOTE: this is retarded, but works and i dont see how this can fail unless the user is just like this method
+            if filename.startswith("brdc"):
+                day_of_year = int(filename[4:7])
+                year_short = int(filename[9:11])
+                year = 2000 + year_short
+                
+                # convert day of year to month/day
+                date = datetime.datetime(year, 1, 1) + datetime.timedelta(day_of_year - 1)
+                
+                #start simulation at the beginning of that day +1 hour to ensure valid ephemeris coverage
+                time_str = date.strftime("%Y/%m/%d,01:00:00")
+                print(f"Detected Ephemeris Date: {time_str}")
+                print("Using -t to align simulation with ephemeris data.")
+                return ["-t", time_str]
+        except:
+            print("[WARN] Could not parse date from filename. Using default time (might fail).")
+        
+        return []
+
+    def _gen_static(self):
+        lat = input("Latitude (e.g. 37.7749): ").strip()
+        lon = input("Longitude (e.g. -122.4194): ").strip()
+        alt = input("Altitude (m): ").strip() or "100"
+        
+        # validate input basic
+        if not lat or not lon:
+            print("Latitude and Longitude required.")
+            input("Press Enter...")
+            return
+
+        cmd = ['./gps-sdr-sim', '-e', self.ephemeris_file.name, '-b', '8', 
+               '-l', f"{lat},{lon},{alt}"]
+        
+        cmd += self._get_time_args()
+        self._run_gen_cmd(cmd)
+
+    def _gen_circle(self):
+        #use -x for LLH
+        #-x does NOT want time column
+        
+        lat0_str = input("Center Lat: ")
+        lon0_str = input("Center Lon: ")
+        if not lat0_str or not lon0_str: return
+        
+        lat0 = float(lat0_str)
+        lon0 = float(lon0_str)
+        radius = float(input("Radius (m) [def: 50]: ") or 50)
+        speed = float(input("Speed (m/s) [def: 10]: ") or 10)
+        duration = int(input("Duration (sec): ") or 300)
+        
+        #ensure motion directory exists before trying to write to it
+        if not self.motion_dir.exists():
+            self.motion_dir.mkdir(parents=True, exist_ok=True)
+
+        csv_path = self.motion_dir / "circle_llh.csv"
+        
+        print("Generating LLH trajectory CSV...")
+        try:
+            with open(csv_path, 'w') as f:
+                # 10hz resolution
+                steps = duration * 10 
+                for i in range(steps):
+                    t = i / 10.0
+                    angle = (speed * t / radius) # radians
+                    
+                    # offsets in meters
+                    dx = radius * math.cos(angle)
+                    dy = radius * math.sin(angle)
+                    
+                    # offsets in degrees (flat earth approx)
+                    dlat = dy / 111111.0
+                    dlon = dx / (111111.0 * math.cos(math.radians(lat0)))
+                    
+                    # Format: lat,lon,height (No time column for -x)
+                    f.write(f"{lat0 + dlat},{lon0 + dlon},100.0\n")
         except Exception as e:
-            print(f"Error during transmission: {e}")
+            print(f"[ERROR] Failed to write CSV: {e}")
+            input("Press Enter...")
+            return
+                
+        # use -x for LLH CSV, not -u or -g, im retarded D:
+        cmd = ['./gps-sdr-sim', '-e', self.ephemeris_file.name, '-b', '8', 
+               '-x', str(csv_path), '-d', str(duration)]
+        
+        cmd += self._get_time_args()
+        self._run_gen_cmd(cmd)
+
+    def _run_gen_cmd(self, cmd):
+        print(f"\nExecuting: {' '.join(cmd)}")
+        print("Processing... (This uses heavy CPU)")
+        
+        try:
+            # run in the gps_sim_dir so it finds the ephemeris file easily
+            subprocess.run(cmd, cwd=self.gps_sim_dir, check=True)
+            
+            bin_path = self.gps_sim_dir / "gpssim.bin"
+            if bin_path.exists() and bin_path.stat().st_size > 0:
+                print(f"\nSignal binary created: {bin_path.name}")
+                print(f"Size: {bin_path.stat().st_size / (1024*1024):.2f} MB")
+            else:
+                print("\nCommand finished but 'gpssim.bin' is missing or empty.")
+        except subprocess.CalledProcessError as e:
+            print(f"\nGeneration failed with exit code {e.returncode}")
         
         input("Press Enter to continue...")
+
+    def transmit_menu(self):
+        bin_file = self.gps_sim_dir / "gpssim.bin"
+        if not bin_file.exists():
+            print("\ngpssim.bin not found. You must generate a signal first (Option 3).")
+            input("Press Enter to continue...")
+            return
+
+        # check for the god damn hackrf bc SOMEHOW my linux machine decided to delete hackrf tools:/, this took quite a while to figure out, lol
+        print("\nChecking for HackRF...")
+        try:
+            result = subprocess.run(['hackrf_info'], capture_output=True, text=True)
+            if "Found HackRF" not in result.stdout:
+                print("No HackRF device detected.")
+                input("Press Enter to continue...")
+                return
+            else:
+                print("HackRF detected.")
+        except FileNotFoundError:
+            print("hackrf_info command not found. Is hackrf package installed?")
+            input("Press Enter to continue...")
+            return
+
+        print("\n--- Transmission ---")
+        print("Frequency: 1575.42 MHz (GPS L1)")
+        print("Sample Rate: 2.6 Msps (Matched to simulation)")
+        gain = input("TX Gain (0-47) [def: 25]: ").strip() or "25"
+        
+        cmd = [
+            'hackrf_transfer',
+            '-t', 'gpssim.bin',
+            '-f', '1575420000',
+            '-s', '2600000',
+            '-a', '1',       # amp on
+            '-x', gain,      # TX Gain
+            '-R'             # repeat
+        ]
+        
+        print(f"\nRunning: {' '.join(cmd)}")
+        print("Press Ctrl+C to stop transmission.")
+        
+        try:
+            subprocess.run(cmd, cwd=self.gps_sim_dir)
+        except KeyboardInterrupt:
+            print("\nTransmission ended.")
+        except Exception as e:
+            print(f"\nTransmission failed: {e}")
+            
+        input("Press Enter to return to menu...")
