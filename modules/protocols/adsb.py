@@ -15,10 +15,10 @@ from queue import Queue, Empty
 class ADSB:
     # CPR constants and other magic numbers
     NZ = 15.0 
-    CPR_MAX_VALUE = 131072.0 
+    CPR_MAX_VALUE = 131072.0 # its 2^17
     
     # CPR Latitude Zone Table (yoinked from mayhem))
-    # NOTE: logic in _cpr_NL is made for this table, DONT FUCK WITH THIS
+    # will leave this here for now, MAY not be needed, but im not sure after all this mindfuckery
     ADSB_LAT_LUT = [
         10.47047130, 14.82817437, 18.18626357, 21.02939493,
         23.54504487, 25.82924707, 27.93898710, 29.91135686,
@@ -38,38 +38,36 @@ class ADSB:
     ]
 
     def __init__(self):
-        # setup base dir for logs and shit
+        # setup base dir for logs and config
         self.base_dir = Path.home() / ".rf_toolkit" / "protocols"
         self.base_dir.mkdir(parents=True, exist_ok=True)
         self.config_path = self.base_dir / "adsb_config.json"
         
-        # load the defaults
+        # load default config
         self._set_default_config()
         self._load_config()
         
-        # process management and state vars
+        # proc management and blah blah
         self.adsb_process = None
         self.monitoring = False
         self.aircraft_data = {}
         self.current_icao = None
         self.current_message_block = []
-        #time for the last seen cleanup
+        #track time for cleanup
         self.last_cleanup = time.time()
-        
-        # data queues and buffers
         self.debug_mode = False
         self.raw_output_queue = Queue() 
         self.raw_output_buffer = []
         self.has_received_data = False
         
-        # Store CPR data for position decoding
+        # CPR data for position decoding
         self.cpr_data = {}
         
-        # nuke function to run on exit
+        #ensure cleanup runs on exit
         atexit.register(self._exit_cleanup)
     
     def _set_default_config(self):
-        # set up default config values
+        # default config
         self.config = {
             "gain": 20,
             "freq": 1090000000,
@@ -77,12 +75,13 @@ class ADSB:
             "lon": 0.0,
             "stats_every": 10,
             "max_display_aircraft": 30,
-            # Finally added local cpr decoding(enter your gps coords in the config menu)default to false to prevent bad data if user hasn't set his current location
+            # Local decoding option (needs GPS coords in config)
+            # Default to False to prevent bad data if location isn't set
             "local_decoding": False
         }
 
     def _save_config(self):
-        # save config to a json
+        #save to json
         try:
             with self.config_path.open('w') as f:
                 json.dump(self.config, f, indent=4)
@@ -90,7 +89,7 @@ class ADSB:
             pass
 
     def _load_config(self):
-        # Load config from a JSON file IF it exists
+        # load the config from json if it exists
         try:
             with self.config_path.open('r') as f:
                 loaded_config = json.load(f)
@@ -99,22 +98,20 @@ class ADSB:
             self._save_config()
 
     def _exit_cleanup(self):
-        # ensure monitoring process is nuked on exit
+        # make sure we stopped the process on user exit
         if self.monitoring or self.adsb_process:
             self.stop_adsb()
     
     def run(self):
-        # loop for the main ads-b menu
+        #main menu
         try:
             while True:
                 os.system('clear')
                 print("========================================")
                 print("       ADS-B AIRCRAFT MONITORING")
                 print("========================================")
-                
                 debug_status = "ON(raw data)" if self.debug_mode else "OFF (table view)"
                 print(f"Debug Mode: {debug_status}")
-                # Show local decoding status
                 local_dec_status = "ON" if self.config.get('local_decoding') else "OFF"
                 print(f"Local Decoding: {local_dec_status}")
                 print("----------------------------------------")
@@ -153,7 +150,7 @@ class ADSB:
             return
     
     def is_readsb_available(self):
-        # check if the readsb is available
+        # check for readsb
         try:
             if subprocess.run(['which', 'readsb'], capture_output=True, text=True).returncode == 0:
                 return True
@@ -164,10 +161,9 @@ class ADSB:
             return False
     
     def install_readsb(self):
-        # install readsb or get ligma
         print("Installing readsb...")
         
-        # try apt install first
+        # try apt install
         try:
             subprocess.run(['sudo', 'apt', 'update'], check=True, capture_output=True)
             install_cmd = ['sudo', 'apt', 'install', '-y', 'readsb']
@@ -179,7 +175,7 @@ class ADSB:
         except Exception as e:
             print(f"Error during repository check: {e}")
 
-        # fallback to source build (this is always a pain in the ass)
+        #build from source if shit doesnt work
         try:
             readsb_dir = self.base_dir / "readsb"
             if readsb_dir.exists():
@@ -202,7 +198,7 @@ class ADSB:
         input("Press Enter to continue...")
     
     def get_readsb_path(self):
-        # Returns the path to the readsb binary
+        # path to the binary
         local_path = str(self.base_dir / 'readsb' / 'readsb')
         if Path(local_path).exists():
             return local_path
@@ -217,7 +213,7 @@ class ADSB:
         return None
         
     def configure_settings(self):
-        # allow user to configure... the config
+        # config menu
         while True:
             os.system('clear')
             print("========================================")
@@ -228,7 +224,7 @@ class ADSB:
             print(f"3. Receiver Latitude:       {self.config['lat']}")
             print(f"4. Receiver Longitude:      {self.config['lon']}")
             print(f"5. Max Aircraft to Display: {self.config['max_display_aircraft']}")
-            # config option for local decoding
+            # added local decoding switch(needs user's lat and lon numbers)
             local_status = "Enabled" if self.config.get('local_decoding') else "Disabled"
             print(f"6. Local Decoding:          {local_status}")
             print("7. Save & Back to Main Menu")
@@ -241,7 +237,7 @@ class ADSB:
                 break
             
             if choice == '6':
-                #logic toggle for local decoding
+                #the toggle for local decoding itself
                 self.config['local_decoding'] = not self.config.get('local_decoding', False)
                 print(f"\nLocal decoding is now {'Enabled' if self.config['local_decoding'] else 'Disabled'}.")
                 input("Press Enter to continue...")
@@ -274,7 +270,7 @@ class ADSB:
             input("Press Enter to continue...")
 
     def start_adsb_monitoring(self):
-        # start the readsb subprocess and initiates data processing
+        # start readsb process and blah blah
         if not self.is_readsb_available():
             print("readsb not found! Please install it first using option 4.")
             input("Press Enter to continue...")
@@ -287,10 +283,10 @@ class ADSB:
             return
         
         try:
-            self.stop_adsb() # stop any running processt
+            self.stop_adsb() #stop any running process
             print("Starting ADS-B monitoring...")
             
-            # readsb launch command.... NOW with correct parameters(trust) NOTE: if you dont know - this is a 4-th iteration bc shit didnt want to work
+            # readsb command
             cmd = [
                 readsb_path,
                 '--device-type', 'hackrf',
@@ -303,7 +299,7 @@ class ADSB:
             
             print(f"Running command: {' '.join(cmd)}")
             
-            # Reset state vars
+            #reset state variables
             self.monitoring = True
             self.aircraft_data = {}
             self.raw_output_buffer = []
@@ -312,7 +308,7 @@ class ADSB:
             self.current_message_block = []
             self.cpr_data = {}
             
-            # Start the readsb subprocess
+            #start readsb subprocess
             self.adsb_process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
@@ -320,10 +316,10 @@ class ADSB:
                 text=True,
                 bufsize=1,
                 universal_newlines=True,
-                preexec_fn=os.setsid # Create a new process group
+                preexec_fn=os.setsid # Create new process group
             )
             
-            # start threads to handle output processing
+            #threads for output processing, separate since forever cause its easier that way and it broke when i tr
             threading.Thread(target=self._enqueue_output, daemon=True).start()
             threading.Thread(target=self._process_data, daemon=True).start()
             
@@ -332,7 +328,7 @@ class ADSB:
             
         except Exception as e:
             print(f"\n Error starting ADS-B monitoring: {e}")
-            # print stderr stuff
+            #stderr output if available
             if self.adsb_process and self.adsb_process.stderr:
                 try:
                     err_output = self.adsb_process.stderr.read().strip()
@@ -347,10 +343,8 @@ class ADSB:
             
         input("Press Enter to continue...")
 
-
-    
     def _enqueue_output(self):
-        # Read stdout/stderr from subprocess and shove fuckers into queue for processing
+        # read through stdout/stderr from subprocess and enqueue for all the juicy stuff(processing)
         def read_pipe(pipe, source):
             while self.monitoring:
                 try:
@@ -359,19 +353,19 @@ class ADSB:
                         self.raw_output_queue.put(line)
                     else:
                         if self.adsb_process.poll() is not None:
-                            break # Process exit
+                            break
                         time.sleep(0.1)
                 except Exception:
                     break
 
-        # start separate threads for stdout and stderr reading NOTE: shit broke when i combined those 2, and i aint fixing this
+        # separate threads for stdout and stderr reading (same as the previous comment on this)
         if self.adsb_process and self.adsb_process.stdout:
             threading.Thread(target=read_pipe, args=(self.adsb_process.stdout, 'stdout'), daemon=True).start()
         if self.adsb_process and self.adsb_process.stderr:
             threading.Thread(target=read_pipe, args=(self.adsb_process.stderr, 'stderr'), daemon=True).start()
 
     def _process_data(self):
-        # pull data from the queue buffer it and parse
+        # pull data and parse it
         while self.monitoring:
             try:
                 line = self.raw_output_queue.get_nowait()
@@ -380,11 +374,11 @@ class ADSB:
                 if not line_str:
                     continue
                 
-                # check for data receive
+                # data reception check
                 if not self.has_received_data and len(line_str) > 5 and line_str.startswith('*'):
                     self.has_received_data = True
 
-                # raw output for debug
+                # output for debug
                 self.raw_output_buffer.append(line_str)
                 if len(self.raw_output_buffer) > 200: 
                     self.raw_output_buffer = self.raw_output_buffer[-100:]
@@ -421,7 +415,8 @@ class ADSB:
             # start of a new message block
             self.current_message_block = [line]
             self.current_icao = None
-        elif self.current_message_block is not None:
+        #ensure block exists and isnt empty
+        elif self.current_message_block:
             # Continue adding to current message block... they are message blocks... from a message block factory.... theyaremessageblo-
             self.current_message_block.append(line)
             
@@ -456,14 +451,14 @@ class ADSB:
     def _parse_message_block_fields(self, block_text, aircraft):
         # Extract callsign, altitude, speed, V-rate, heading, lon/lat using regex (holy fuck i wanna kill myself)
         
-        # Callsign
+        #callsign
         callsign_match = re.search(r'Ident:\s*([A-Z0-9]{2,8})\s', block_text)
         if callsign_match:
             callsign = callsign_match.group(1).strip()
             if callsign and len(callsign) >= 2 and callsign != 'unknown':
                 aircraft['callsign'] = callsign
 
-        # altitude (baro or geom, whatever tf works)
+        #altitude (baro or geom, whatever tf works)
         alt_patterns = [r'(?:Baro|Geom) altitude:\s*([0-9,]+)\s*ft', r'Altitude:\s*([0-9,]+)\s*ft']
         for pattern in alt_patterns:
             alt_match = re.search(pattern, block_text)
@@ -536,27 +531,28 @@ class ADSB:
             current_time = time.time()
             frame_data = {'lat': lat, 'lon': lon, 'time': current_time, 'type': cpr_type}
 
-            #if local decoding is enabled, try to decode immediately with reference position
+             #if local decoding is enabled, try to decode immediately with reference position
             decoded_locally = False
+            # determine format bit 'i': 0 for even, 1 for odd
             if use_local:
-                # determine format bit 'i': 0 for even, 1 for odd
                 i = 1 if is_odd else 0
                 try:
                     ref_lat = float(self.config.get('lat', 0.0))
                     ref_lon = float(self.config.get('lon', 0.0))
-                    
+
                     #decode latitude
                     rec_lat = self._local_decode_lat(ref_lat, lat, i)
-                    
-                    # calculate NL using recovered latitude
-                    nl = self._cpr_NL(rec_lat)
-                    
-                    # decode longitude
-                    rec_lon = self._local_decode_lon(ref_lon, lon, i, nl)
-                    
-                    aircraft['lat'] = f"{rec_lat:.4f}"
-                    aircraft['lon'] = f"{rec_lon:.4f}"
-                    decoded_locally = True
+                    # if no lat - cannot proceed
+                    if rec_lat is not None:
+                        # calculate NL using recovered latitude
+                        nl = self._cpr_NL(rec_lat)
+                        # decode longitude
+                        rec_lon = self._local_decode_lon(ref_lon, lon, i, nl)
+                        
+                        if rec_lon is not None:
+                            aircraft['lat'] = f"{rec_lat:.4f}"
+                            aircraft['lon'] = f"{rec_lon:.4f}"
+                            decoded_locally = True
                 except Exception:
                     pass # fallback to global if local fails
 
@@ -606,15 +602,17 @@ class ADSB:
         # ICAO specified NL function
         if lat == 0:
             return 59
-        lat_rad = math.radians(abs(lat))
-        if lat > 87 or lat < -87:
+        
+        # fixed threshold for nl=1
+        if abs(lat) >= 87.0:
             return 1
 
+        lat_rad = math.radians(abs(lat))
         try:
             t = 1 - math.cos(math.pi / 30) / math.cos(lat_rad)
             if t <= 0:
                 return 1
-
+            #Note: whaat is happening????? i think this works
             acos_arg = t
             if acos_arg < -1:
                 acos_arg = -1
@@ -637,109 +635,128 @@ class ADSB:
         r = a % b
         return r if r >= 0 else r + b
 
+    # updated global cecoding logic to match NASA article(i fucked up, now fixed)
     def _decode_cpr(self, even_lat, even_lon, odd_lat, odd_lon, even_ts, odd_ts, cpr_type, ref_lat, ref_lon):
-        # decode a CPR even/odd pair
+        # max time difference check
         dt = abs(even_ts - odd_ts)
         if dt > 10.0:
             return None
 
-        NZ = self.NZ
-        max_cpr = self.CPR_MAX_VALUE
+        # integer math for zone Index, using integer division // to mimic floor
+        j = (59 * even_lat - 60 * odd_lat + 65536) // 131072
 
-        if cpr_type == 'Surface':
-            scale_lat = 90.0
-            scale_lon = 90.0
-        else:
-            scale_lat = 360.0
-            scale_lon = 360.0
+        dlat_even = 360.0 / 60.0
+        dlat_odd = 360.0 / 59.0
 
-        dlat_even = scale_lat / (4.0 * NZ)
-        dlat_odd = scale_lat / (4.0 * NZ - 1.0)
-	# holy fuck thats a lotta math, lmfao
-        j = math.floor(((4.0 * NZ - 1.0) * even_lat - (4.0 * NZ) * odd_lat) / max_cpr + 0.5)
+        # find latitude for both even and odd frames
+        #rlat = dlat * ( (zin - nz * floor(zin/nz)) + YZ/2^17 )
+        
+        #even frame (i=0)
+        rlat_even = dlat_even * (self._cpr_mod(j, 60) + even_lat / 131072.0)
+        # odd frame (i=1)
+        rlat_odd = dlat_odd * (self._cpr_mod(j, 59) + odd_lat / 131072.0)
 
-        rlat_even = dlat_even * (self._cpr_mod(j, int(4 * NZ)) + even_lat / max_cpr)
-        rlat_odd = dlat_odd * (self._cpr_mod(j, int(4 * NZ - 1)) + odd_lat / max_cpr)
-
+        # select most recent latitude
         if even_ts >= odd_ts:
-            lat_raw = rlat_even
+            rlat = rlat_even
             i = 0
+            xz = even_lon
         else:
-            lat_raw = rlat_odd
+            rlat = rlat_odd
             i = 1
+            xz = odd_lon
 
-        if cpr_type == 'Surface':
-            lat_N = lat_raw
-            lat_S = lat_raw - 90.0
-        else:
-            lat_N = lat_raw
-            lat_S = lat_raw - 360.0
-
-        try:
-            ref_lat_f = float(ref_lat)
-        except Exception:
-            ref_lat_f = None
-
-        if ref_lat_f is not None:
-            if abs(lat_N - ref_lat_f) <= abs(lat_S - ref_lat_f):
-                lat = lat_N
-            else:
-                lat = lat_S
-        else:
-            if cpr_type == 'Surface':
-                lat = lat_N if lat_N <= 45.0 else lat_S
-            else:
-                lat = lat_raw
-                if lat >= 270.0:
-                    lat -= 360.0
-
-        if lat < -90.0 or lat > 90.0:
+        #removed a hack, cause it fucks shit up
+        if rlat < -90.0 or rlat > 90.0:
             return None
 
-        nl = self._cpr_NL(lat)
-        if nl < 1:
+        #check NL consistency
+        # global decoding of lon is valid only if NL(rlat_even) == NL(rlat_odd)
+        nl_even = self._cpr_NL(rlat_even)
+        nl_odd = self._cpr_NL(rlat_odd)
+        
+        if nl_even != nl_odd:
+            return None
+            
+        nl = nl_even # common NL value
+
+        # lon decoding
+        if nl == 1:
+            rlon = 360.0 * xz / 131072.0
+        else:
+            #correct modulus is nli = max(nl - i, 1)
+            nli = max(nl - i, 1)
+            dlon = 360.0 / nli
+            
+            #integer math for lon zone index
+            m = ((nl - 1) * even_lon - nl * odd_lon + 65536) // 131072
+            
+            rlon = dlon * (self._cpr_mod(m, nli) + xz / 131072.0)
+
+        # normalize lon to standard [-180, 180]
+        if rlon >= 180.0: rlon -= 360.0
+        
+        return rlat, rlon
+
+    def _local_decode_lat(self, lat_ref, lat_msg, i):
+        # new - added validity check for local decoding
+        
+        if not (0 <= lat_msg < self.CPR_MAX_VALUE):
+            raise ValueError("lat_msg out of 17-bit range")
+
+        dlati = self._cpr_Dlat(i)
+        
+        #local decoding formula
+        encoded_term = lat_msg / self.CPR_MAX_VALUE
+        j1 = math.floor(lat_ref / dlati)
+        mod_term = self._cpr_mod(lat_ref, dlati) / dlati
+        j2 = math.floor(0.5 + mod_term - encoded_term)
+        j = j1 + j2
+        
+        rlat = dlati * (j + encoded_term)
+        
+        #removed wrap, check bounds(same hack as in the global decode)
+        if rlat < -90.0 or rlat > 90.0:
+            return None 
+            
+        # range check
+        limit = dlati/2.0 - dlati/262144.0 
+        if abs(rlat - lat_ref) > limit:
+            return None # Too far from reference
+
+        return rlat
+
+    def _local_decode_lon(self, lon_ref, lon_msg, i, nl):
+        # normalize reference lon
+        lon_ref = (lon_ref + 360.0) % 360.0
+        
+        if not (0 <= lon_msg < self.CPR_MAX_VALUE):
+            raise ValueError("lon_msg out of 17-bit range")
+
+        #use correct nli for local decode
+        nli = max(nl - i, 1)
+        dloni = 360.0 / nli 
+        
+        encoded_term = lon_msg / self.CPR_MAX_VALUE
+        m1 = math.floor(lon_ref / dloni)
+        mod_term = self._cpr_mod(lon_ref, dloni) / dloni
+        m2 = math.floor(0.5 + mod_term - encoded_term)
+        m = m1 + m2
+        
+        rlon = dloni * (m + encoded_term)
+        
+        #normalize result
+        if rlon > 180.0: rlon -= 360.0
+        
+        #wrap-around distance for longitude
+        diff = abs(rlon - ((lon_ref + 180) % 360 - 180)) 
+        if diff > 180: diff = 360 - diff
+        
+        limit = dloni/2.0 - dloni/262144.0
+        if diff > limit:
             return None
 
-        ni = max(1.0, nl - i)
-        dlon = scale_lon / ni
-
-        m = math.floor(((even_lon * (nl - 1.0)) - (odd_lon * nl)) / max_cpr + 0.5)
-
-        if i == 0:
-            lon_base = dlon * (self._cpr_mod(m, int(nl)) + even_lon / max_cpr)
-        else:
-            lon_base = dlon * (self._cpr_mod(m, int(nl - 1.0)) + odd_lon / max_cpr)
-
-        try:
-            ref_lon_f = float(ref_lon)
-        except Exception:
-            ref_lon_f = None
-
-        if cpr_type == 'Surface':
-            if ref_lon_f is not None:
-                candidates = []
-                for k in range(4):
-                    lon_k = lon_base + 90.0 * k
-                    while lon_k >= 180.0:
-                        lon_k -= 360.0
-                    while lon_k < -180.0:
-                        lon_k += 360.0
-                    candidates.append(lon_k)
-                lon = min(candidates, key=lambda v: abs(v - ref_lon_f))
-            else:
-                lon = lon_base
-                while lon >= 180.0:
-                    lon -= 360.0
-                while lon < -180.0:
-                    lon += 360.0
-        else:
-            lon = lon_base
-            if lon > 180.0:
-                lon -= 360.0
-            if lon < -180.0:
-                lon += 360.0
-
-        return lat, lon
+        return rlon
 
     def _try_decode_cpr_position(self, icao, aircraft):
         if icao not in self.cpr_data:
@@ -792,73 +809,6 @@ class ADSB:
         except Exception:
             pass
 
-    def _local_decode_lat(self, lat_ref, lat_msg, i):
-        # local decode formula for latitude (Rlati) for single-message decoding - i THINK it works:D
-        # lat_ref: reference latitude (previous position)
-        # lat_msg: encoded latitude message (Y^Zi)
-        # i: format bit (0=even, 1=odd)
-        
-        # range check for 17-bit input
-        if not (0 <= lat_msg < self.CPR_MAX_VALUE):
-            raise ValueError("lat_msg out of 17-bit range")
-
-        dlati = self._cpr_Dlat(i)
-        
-        # Y^Zi / 2^17
-        encoded_term = lat_msg / self.CPR_MAX_VALUE
-        
-        # zone Index j
-        j1 = math.floor(lat_ref / dlati)
-        mod_term = self._cpr_mod(lat_ref, dlati) / dlati
-        j2 = math.floor(0.5 + mod_term - encoded_term)
-        j = j1 + j2
-        
-        #rlat
-        rlat = dlati * (j + encoded_term)
-        
-        #corrected latitude normalization or sm nerd ass bullshit, RAHHHHHHHHHH
-        # check for the 270-degree wrap-around
-        if rlat >= 270.0:
-            rlat -= 360.0
-            
-        # final check for valid ADS-B range
-        if rlat > 90.0 or rlat < -90.0:
-            raise ValueError("Recovered latitude outside valid range [-90, 90]")
-            
-        return rlat
-
-    def _local_decode_lon(self, lon_ref, lon_msg, i, nl):
-        #decode for Rloni, fixed Dlon formula used
-        # lon_msg: encoded longitude message (X^Zi)
-        # i: format bit (0=even, 1=odd)
-        # nl: number of longitude zones (repeating this part to not forget it and its easier to look for it here)
-        
-        # range check for 17-bit input
-        if not (0 <= lon_msg < self.CPR_MAX_VALUE):
-            raise ValueError("lon_msg out of 17-bit range")
-
-        dloni = self._cpr_Dlon(i, nl) # NOW uses fixed Dlon
-        
-        # X^Zi / 2^17
-        encoded_term = lon_msg / self.CPR_MAX_VALUE
-        
-        # zone Index m
-        m1 = math.floor(lon_ref / dloni)
-        mod_term = self._cpr_mod(lon_ref, dloni) / dloni
-        m2 = math.floor(0.5 + mod_term - encoded_term)
-        m = m1 + m2
-        
-        # recovered longitude (rlon)
-        rlon = dloni * (m + encoded_term)
-        
-        # Normalize to [-180, 180]
-        while rlon > 180.0:
-            rlon -= 360.0
-        while rlon < -180.0:
-            rlon += 360.0
-            
-        return rlon
-
     def view_aircraft(self):
         if not self.monitoring or not self.adsb_process:
             print("ADS-B monitoring is not running! Start monitoring first using option 1.")
@@ -905,7 +855,7 @@ class ADSB:
 
                         sorted_aircraft = sorted(
                             self.aircraft_data.values(),
-                            key=lambda x: x.get('last_seen', 0.0), # sort by numeric timestamp
+                            key=lambda x: x.get('last_seen', 0.0), 
                             reverse=True
                         )
 
@@ -917,7 +867,7 @@ class ADSB:
                             heading = aircraft.get('heading', 'N/A')
                             v_rate = aircraft.get('v_rate', 'N/A')
                             
-                            # convert timestamp to string only for display to keep stuff running smooth
+                            # convert timestamp to string only for display
                             ts = aircraft.get('last_seen', 0.0)
                             if isinstance(ts, float):
                                 last_seen = datetime.datetime.fromtimestamp(ts).strftime("%H:%M:%S")
