@@ -5,12 +5,39 @@ import time
 from pathlib import Path
 import numpy as np
 import subprocess
+import json
 #defining stuff
 class RFReplay:
     def __init__(self):
         self.recording = False
         self.base_dir = Path.home() / ".rf_toolkit" / "recordings"
         self.base_dir.mkdir(parents=True, exist_ok=True)
+        self.config_path = self.base_dir / "rf_replay_config.json"
+        self._set_default_config()
+        self._load_config()
+
+    def _set_default_config(self):
+    self.config = {
+        "sample_rate": 2000000,
+        "rx_lna": 16,
+        "rx_vga": 20,
+        "tx_gain": 0
+    }
+
+    def _load_config(self):
+    try:
+        with self.config_path.open("r") as f:
+            self.config.update(json.load(f))
+    except:
+        self._save_config()
+
+    def _save_config(self):
+    try:
+        with self.config_path.open("w") as f:
+            json.dump(self.config, f, indent=4)
+    except:
+        pass
+    
     
     def run(self):
         while True:
@@ -22,7 +49,8 @@ class RFReplay:
             print("1. Record RF Signal")
             print("2. Replay Recorded Signal")
             print("3. List Recordings")
-            print("4. Back to Main Menu")
+            print("4. Configure RF Settings")
+            print("5. Back to Main Menu")
 # choice for the options
             choice = input("\nEnter choice (1-4): ").strip()
             
@@ -33,6 +61,9 @@ class RFReplay:
             elif choice == '3':
                 self.list_recordings()
             elif choice == '4':
+            elif choice == '4':
+                self.configure_settings()
+            elif choice == '5':
                 return
 # hey! i didnt even forget to add some error handling, how nice of me ^_^
             else:
