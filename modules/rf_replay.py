@@ -26,17 +26,55 @@ class RFReplay:
 
     def _load_config(self):
     try:
-        with self.config_path.open("r") as f:
-            self.config.update(json.load(f))
+        with
+ self.config_path.open("r") as f:
+ self.config.update(json.load(f))
     except:
         self._save_config()
 
     def _save_config(self):
     try:
-        with self.config_path.open("w") as f:
+        with 
+    self.config_path.open("w") as f:
             json.dump(self.config, f, indent=4)
     except:
         pass
+
+    def configure_settings(self):
+        while True:
+            os.system("clear")
+
+            print("====== RF SETTINGS ======")
+            print(f"1. Sample Rate : {self.config['sample_rate']}")
+            print(f"2. RX LNA Gain : {self.config['rx_lna']}")
+            print(f"3. RX VGA Gain : {self.config['rx_vga']}")
+            print(f"4. TX Gain     : {self.config['tx_gain']}")
+            print("5. Save & Return")
+
+            choice = input("Select option: ").strip()
+
+            if choice == "5":
+                self._save_config()
+                return
+
+            setting_map = {
+                "1": ("sample_rate", int, "Enter sample rate: "),
+                "2": ("rx_lna", int, "Enter RX LNA (0-40): "),
+                "3": ("rx_vga", int, "Enter RX VGA (0-62): "),
+                "4": ("tx_gain", int, "Enter TX gain (0-47): ")
+            }
+
+            if choice in setting_map:
+                key, dtype, prompt = setting_map[choice]
+
+                try:
+                    val = input(prompt).strip()
+                    if val:
+                        self.config[key] = dtype(val)
+                except:
+                    print("Invalid input")
+
+            input("Press Enter...")
     
     
     def run(self):
