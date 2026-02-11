@@ -17,28 +17,28 @@ class RFReplay:
         self._load_config()
 
     def _set_default_config(self):
-    self.config = {
+        self.config = {
         "sample_rate": 2000000,
         "rx_lna": 16,
         "rx_vga": 20,
         "tx_gain": 0
-    }
+         }
 
     def _load_config(self):
-    try:
-        with
- self.config_path.open("r") as f:
- self.config.update(json.load(f))
-    except:
-        self._save_config()
+        try:
+            with
+        self.config_path.open("r") as f:
+        self.config.update(json.load(f))
+        except:
+            self._save_config()
 
     def _save_config(self):
     try:
         with 
-    self.config_path.open("w") as f:
+            self.config_path.open("w") as f:
             json.dump(self.config, f, indent=4)
-    except:
-        pass
+        except:
+          pass
 
     def configure_settings(self):
         while True:
