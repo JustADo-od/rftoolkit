@@ -52,7 +52,7 @@ class RFReplay:
             print("4. Configure RF Settings")
             print("5. Back to Main Menu")
 # choice for the options
-            choice = input("\nEnter choice (1-4): ").strip()
+            choice = input("\nEnter choice (1-5): ").strip()
             
             if choice == '1':
                 self.record_signal()
@@ -60,7 +60,6 @@ class RFReplay:
                 self.replay_signal()
             elif choice == '3':
                 self.list_recordings()
-            elif choice == '4':
             elif choice == '4':
                 self.configure_settings()
             elif choice == '5':
@@ -87,10 +86,15 @@ class RFReplay:
             print("Press Ctrl+C to stop recording")
             
 # using hackrf_transfer to do stuff, because its the easiest way to do everything, even tho only hackrf one is the only sdr supported that way:/
+            
             cmd = [
-                'hackrf_transfer', '-r', str(filepath),
-                '-f', f"{float(freq)*1e6}", '-s', '2000000', '-g', '20', '-l', '32'
-            ]
+             'hackrf_transfer',
+             '-r', str(filepath),
+             '-f', f"{float(freq)*1e6}",
+             '-s', str(self.config["sample_rate"]),
+             '-g', str(self.config["rx_vga"]),
+             '-l', str(self.config["rx_lna"])
+                  ]
             
             process = subprocess.Popen(cmd)
             
@@ -121,7 +125,6 @@ class RFReplay:
             choice = int(input("\nSelect recording to replay: ")) - 1
             if 0 <= choice < len(recordings):
                 freq = input("Enter replay frequency in MHz: ").strip()
-                gain = input("Enter TX gain (0-47, default 20): ").strip() or "20"
                 repeat = input("Repeat transmission? (y/n, default n): ").strip().lower() or "n"
                 
                 print(f"Replaying {recordings[choice].name} on {freq} MHz...")
@@ -129,8 +132,8 @@ class RFReplay:
                 cmd = [
                     'hackrf_transfer', '-t', str(recordings[choice]),
                     '-f', f"{float(freq)*1e6}", 
-                    '-s', '2000000', 
-                    '-x', gain
+                    '-s', str(self.config["sample_rate"]),
+                    '-x', str(self.config["tx_gain"])
                 ]
                 
                 # Adding repeat option if requested (stupid ass thing, but oh well)
